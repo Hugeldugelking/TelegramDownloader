@@ -1,13 +1,19 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using TelegramDownloader.Data;
+using TelegramDownloader.Services;
+using TelegramDownloader.Utils;
+
+Db.Setup();
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 builder.Services.AddRazorPages();
 builder.Services.AddServerSideBlazor();
-builder.Services.AddSingleton<WeatherForecastService>();
+builder.Services.AddSingleton<TelegramAutoDownloader>();
+builder.Services.AddHostedService(serviceProvider => serviceProvider.GetRequiredService<TelegramAutoDownloader>());
+//builder.Services.AddSingleton<WeatherForecastService>();
 
 var app = builder.Build();
 
@@ -19,7 +25,7 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
-app.UseHttpsRedirection();
+//app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 
