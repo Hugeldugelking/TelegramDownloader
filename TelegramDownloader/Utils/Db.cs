@@ -8,12 +8,22 @@ namespace TelegramDownloader.Utils;
 
 public static class Db
 {
+    private static List<string> _settingKeys = new List<string>()
+    {
+        "tg_api_id",
+        "tg_api_hash",
+        "tg_phone_number",
+        "tg_verification_code"
+    };
+
     public static void Setup()
     {
         if (!File.Exists(GetDatabaseLocation()))
         {
             CreateDb();
         }
+
+        UpdateDb();
     }
 
     /// <summary>
@@ -42,7 +52,7 @@ public static class Db
                     chat.Id = dbChats[0].Id;
                     UpdateChat(dbc, chat);
                 }
-                else if(dbChats.Count() != 1)
+                else if (dbChats.Count() != 1)
                 {
                     List<int> ids = new List<int>();
                     foreach (ChatModel dbChat in dbChats)
@@ -66,26 +76,47 @@ public static class Db
     public static List<ChatModel> LoadChats(int enabled = -1, long telegramId = -1)
     {
         string sql = "SELECT * FROM Chats";
-        
+
         if ((enabled != -1) || (telegramId != -1))
             sql += " WHERE";
         if (enabled != -1)
-            sql += (sql.IndexOf(" WHERE ", StringComparison.Ordinal) != -1) ? $" AND Enabled={enabled}" : $" Enabled={enabled}";
+            sql += (sql.IndexOf(" WHERE ", StringComparison.Ordinal) != -1)
+                       ? $" AND Enabled={enabled}"
+                       : $" Enabled={enabled}";
         if (telegramId != -1)
-            sql += (sql.IndexOf(" WHERE ", StringComparison.Ordinal) != -1) ? $" AND TelegramId={telegramId}" : $" TelegramId={telegramId}";
+            sql += (sql.IndexOf(" WHERE ", StringComparison.Ordinal) != -1)
+                       ? $" AND TelegramId={telegramId}"
+                       : $" TelegramId={telegramId}";
 
         using IDbConnection dbc    = new SQLiteConnection(GetConnectionString());
         List<ChatModel>     result = dbc.Query<ChatModel>(sql).ToList();
         return result;
     }
 
-    public static string GetSetting(string key)
+    public static Dictionary<string, string> LoadSettings()
     {
-        string sql = $"SELECT Value FROM Settings WHERE key='{key}'";
-        
-        using IDbConnection dbc    = new SQLiteConnection(GetConnectionString());
-        List<string>        result = dbc.Query<string>(sql).ToList();
-        return result[0];
+        string              sql = "SELECT Key, Value FROM Settings";
+        using IDbConnection dbc = new SQLiteConnection(GetConnectionString());
+
+        Dictionary<string, string> settings =
+            dbc.Query<KeyValuePair<string, string>>(sql).ToDictionary(x => x.Key, x => x.Value);
+
+        return settings;
+    }
+
+    public static int UpdateSettings(Dictionary<string, string> settings)
+    {
+        string                     sql        = "";
+        Dictionary<string, string> dbSettings = LoadSettings();
+
+        foreach (KeyValuePair<string,string> dbSetting in dbSettings)
+        {
+            if (String.Equals(dbSetting.Value, settings[dbSetting.Key]))
+                sql += $"UPDATE Settings SET Value='{settings[dbSetting.Key]}' WHERE Key='{dbSetting.Key}';";
+        }
+
+        using IDbConnection dbc = new SQLiteConnection(GetConnectionString());
+        return dbc.Execute(sql);
     }
 
     /// <summary>
@@ -130,15 +161,23 @@ public static class Db
         return dbc.Execute(sql, chat);
     }
 
-    private static int InsertSettings(IDbConnection dbc, Dictionary<string, string> settings)
+    /// <summary>
+    /// Inserts setting keys into database from _settingKeys if they're missing
+    /// </summary>
+    /// <param name="dbc"></param>
+    /// <returns></returns>
+    private static int CreateSettings(IDbConnection dbc)
     {
-        string sql = "";
-        foreach (KeyValuePair<string,string> setting in settings)
+        string       sql        = "SELECT Key FROM Settings";
+        List<string> dbSettings = dbc.Query<string>(sql).ToList();
+        sql = "";
+        foreach (string setting in _settingKeys)
         {
-            sql += $"INSERT INTO Settings(Key, Value) VALUES('{setting.Key}', '{setting.Value}');";
+            if (!dbSettings.Contains(setting))
+                sql += $"INSERT INTO Settings(Key, Value) VALUES('{setting}', '');";
         }
 
-        return dbc.Execute(sql);
+        return (String.IsNullOrEmpty(sql)) ? 0 : dbc.Execute(sql);
     }
 
     /// <summary>
@@ -148,38 +187,39 @@ public static class Db
     {
         SQLiteConnection.CreateFile(GetDatabaseLocation());
 
-        using (IDbConnection dbc = new SQLiteConnection(GetConnectionString()))
-        {
-            string sql = "CREATE TABLE 'Chats' ("               +
-                         "'Id' INTEGER NOT NULL UNIQUE,"        +
-                         "'TelegramName' TEXT NOT NULL,"        +
-                         "'Username' TEXT,"                     +
-                         "'StorageName' TEXT,"                  +
-                         "'TelegramId' INTEGER NOT NULL,"       +
-                         "'AccessHash' INTEGER NOT NULL,"       +
-                         "'LastDownloadedId' INTEGER NOT NULL," +
-                         "'Enabled' INTEGER NOT NULL,"          +
-                         "PRIMARY KEY('Id' AUTOINCREMENT)"      +
-                         ");";
-            dbc.Execute(sql);
+        using IDbConnection dbc = new SQLiteConnection(GetConnectionString());
+        string sql = "CREATE TABLE 'Chats' ("               +
+                     "'Id' INTEGER NOT NULL UNIQUE,"        +
+                     "'TelegramName' TEXT NOT NULL,"        +
+                     "'Username' TEXT,"                     +
+                     "'StorageName' TEXT,"                  +
+                     "'TelegramId' INTEGER NOT NULL,"       +
+                     "'AccessHash' INTEGER NOT NULL,"       +
+                     "'LastDownloadedId' INTEGER NOT NULL," +
+                     "'Enabled' INTEGER NOT NULL,"          +
+                     "PRIMARY KEY('Id' AUTOINCREMENT)"      +
+                     ");";
+        dbc.Execute(sql);
 
-            sql = "CREATE TABLE 'Settings' (" +
-                  "'Id' INTEGER NOT NULL UNIQUE," +
-                  "'Key' TEXT,"            +
-                  "'Value' TEXT,"+
-                  "PRIMARY KEY('Id' AUTOINCREMENT )"+
-                  ");";
-            dbc.Execute(sql);
+        sql = "CREATE TABLE 'Settings' ("        +
+              "'Id' INTEGER NOT NULL UNIQUE,"    +
+              "'Key' TEXT,"                      +
+              "'Value' TEXT,"                    +
+              "PRIMARY KEY('Id' AUTOINCREMENT )" +
+              ");";
+        dbc.Execute(sql);
 
-            Dictionary<string, string> settings = new Dictionary<string, string>
-            {
-                { "api_id", "" },
-                { "api_hash", "" },
-                { "phone_number", "" },
-                { "verification_code", "" }
-            };
-            InsertSettings(dbc, settings);
-        }
+        CreateSettings(dbc);
+    }
+
+    /// <summary>
+    /// Updates Database in case there are missing some columns/settings
+    /// </summary>
+    private static void UpdateDb()
+    {
+        using IDbConnection dbc = new SQLiteConnection(GetConnectionString());
+
+        CreateSettings(dbc);
     }
 
     /// <summary>
