@@ -1,0 +1,64 @@
+@page "/LoginDataTest"
+@using TelegramDownloader.Services
+@using TelegramDownloader.Models.UI
+@inject ILogger<LoginDataTest> Logger
+@inject TelegramDownloaderWorker tgDownloader
+
+<PageTitle>LoginDataTest</PageTitle>
+
+<h3>LoginDataTest</h3>
+
+<EditForm Model="@tgLoginData" OnValidSubmit="@HandleSubmit">
+    <DataAnnotationsValidator></DataAnnotationsValidator>
+    <ValidationSummary></ValidationSummary>
+    
+    <label>
+        API ID
+        <InputText id="api_id" @bind-Value="tgLoginData.api_id"></InputText>
+    </label><br/>
+    <label>
+        API Hash
+        <InputText id="api_hash" @bind-Value="tgLoginData.api_hash"></InputText>
+    </label><br/>
+    <label>
+        Telefonnummer
+        <InputText id="phone_number" @bind-Value="tgLoginData.phone_number"></InputText>
+    </label><br/>
+    
+    <button type="submit">Anmelden</button><br/>
+</EditForm>
+
+<label>
+    Verifizierungscode
+    <input type="text" id="verification_code" @bind="verificationCode"><br/>
+</label>
+
+<button @onclick="SubmitVerificationCode">Verifizierungscode senden</button>
+
+@code {
+    TgLoginModel tgLoginData = new TgLoginModel();
+    string verificationCode = "";
+    
+    
+    private void HandleSubmit()
+    {
+        Dictionary<string, string> settings = new Dictionary<string, string>()
+        {
+            { "tg_api_id", tgLoginData.api_id },
+            { "tg_api_hash", tgLoginData.api_hash },
+            { "tg_phone_number", tgLoginData.phone_number }
+        };
+        
+        tgDownloader.UpdateSettings(settings);
+    }
+
+    private void SubmitVerificationCode()
+    {
+        Dictionary<string, string> settings = new Dictionary<string, string>()
+        {
+            { "tg_verification_code", verificationCode }
+        };
+        
+        tgDownloader.UpdateSettings(settings);
+    }
+}

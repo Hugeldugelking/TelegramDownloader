@@ -8,12 +8,17 @@ namespace TelegramDownloader.Utils;
 
 public static class Db
 {
-    private static List<string> _settingKeys = new List<string>()
+    private static readonly Dictionary<string, string> SettingKeys = new Dictionary<string, string>()
     {
-        "tg_api_id",
-        "tg_api_hash",
-        "tg_phone_number",
-        "tg_verification_code"
+        { "tg_api_id", "" },
+        { "tg_api_hash", "" },
+        { "tg_phone_number", "" },
+        { "tg_verification_code", "" },
+        { "tg_first_name", "" },
+        { "tg_last_name", "" },
+        { "tg_password", "" },
+        { "use_live_update", "false" },
+        { "update_interval", "5" }
     };
 
     public static void Setup()
@@ -34,12 +39,13 @@ public static class Db
     /// - deletes all matching records and saves the chat if there are multiple entries for a single chat<br />
     /// </summary>
     /// <param name="chats">List containing the chats to be updated. Use <c>ChatModel</c>s Methods to convert Telegram type chats to <c>ChatModel</c> class</param>
-    public static void UpdateChats(List<ChatModel> chats)
+    /// <param name="isNewDataFromTelegram">Datasets are only updated by this program OR by telegram. Set to true if the new data comes from telegram</param>
+    public static void UpdateChats(List<ChatModel> chats, bool isNewDataFromTelegram = false)
     {
         using IDbConnection dbc = new SQLiteConnection(GetConnectionString());
         foreach (ChatModel chat in chats)
         {
-            List<ChatModel> dbChats = LoadChats(default, chat.TelegramId);
+            List<ChatModel> dbChats = LoadChats(-1, chat.TelegramId);
 
             if (!dbChats.Any())
             {
@@ -47,10 +53,13 @@ public static class Db
             }
             else
             {
-                if ((dbChats.Count() == 1) && (!dbChats[0].RelevantAttributesEquals(chat)))
+                if (((dbChats.Count() == 1) && !isNewDataFromTelegram &&
+                     !dbChats[0].AppRelevantAttributesEquals(chat)) ||
+                    ((dbChats.Count() == 1) && isNewDataFromTelegram &&
+                     !dbChats[0].TgRelevantAttributesEquals(chat)))
                 {
                     chat.Id = dbChats[0].Id;
-                    UpdateChat(dbc, chat);
+                    UpdateChat(dbc, chat, isNewDataFromTelegram);
                 }
                 else if (dbChats.Count() != 1)
                 {
@@ -109,9 +118,9 @@ public static class Db
         string                     sql        = "";
         Dictionary<string, string> dbSettings = LoadSettings();
 
-        foreach (KeyValuePair<string,string> dbSetting in dbSettings)
+        foreach (KeyValuePair<string, string> dbSetting in dbSettings)
         {
-            if (String.Equals(dbSetting.Value, settings[dbSetting.Key]))
+            if (!String.Equals(dbSetting.Value, settings[dbSetting.Key]))
                 sql += $"UPDATE Settings SET Value='{settings[dbSetting.Key]}' WHERE Key='{dbSetting.Key}';";
         }
 
@@ -125,12 +134,14 @@ public static class Db
     /// </summary>
     /// <param name="dbc"><c>IDbConnection</c> Database connection</param>
     /// <param name="chat"><c>ChatModel</c> Instance with modified attributes</param>
+    /// <param name="isNewDataFromTelegram">Datasets are only updated by this program OR by telegram. Set to true if the new data comes from telegram</param>
     /// <returns></returns>
-    private static int UpdateChat(IDbConnection dbc, ChatModel chat)
+    private static int UpdateChat(IDbConnection dbc, ChatModel chat, bool isNewDataFromTelegram)
     {
-        string sql =
-            "UPDATE Chats SET TelegramName=@TelegramName, Username=@Username, AccessHash=@AccessHash, LastDownloadedId=@LastDownloadedId " +
-            "WHERE Id=@Id";
+        string sql = (isNewDataFromTelegram)
+                         ? "UPDATE Chats SET TelegramName=@TelegramName, Username=@Username, Type=@Type, AccessHash=@AccessHash " +
+                           "WHERE Id=@Id"
+                         : "UPDATE Chats SET LastDownloadedId=@LastDownloadedId, Enabled=@Enabled WHERE Id=@Id";
 
         return dbc.Execute(sql, chat);
     }
@@ -156,8 +167,8 @@ public static class Db
     private static int SaveChat(IDbConnection dbc, ChatModel chat)
     {
         string sql =
-            "INSERT INTO Chats(TelegramName, Username, StorageName, TelegramId, AccessHash, LastDownloadedId, Enabled)" +
-            "VALUES(@TelegramName, @Username, @StorageName, @TelegramId, @AccessHash, @LastDownloadedId, @Enabled)";
+            "INSERT INTO Chats(TelegramName, Username, StorageName, Type, TelegramId, AccessHash, LastDownloadedId, Enabled)" +
+            "VALUES(@TelegramName, @Username, @StorageName, @Type, @TelegramId, @AccessHash, @LastDownloadedId, @Enabled)";
         return dbc.Execute(sql, chat);
     }
 
@@ -171,10 +182,10 @@ public static class Db
         string       sql        = "SELECT Key FROM Settings";
         List<string> dbSettings = dbc.Query<string>(sql).ToList();
         sql = "";
-        foreach (string setting in _settingKeys)
+        foreach (KeyValuePair<string, string> setting in SettingKeys)
         {
-            if (!dbSettings.Contains(setting))
-                sql += $"INSERT INTO Settings(Key, Value) VALUES('{setting}', '');";
+            if (!dbSettings.Contains(setting.Key))
+                sql += $"INSERT INTO Settings(Key, Value) VALUES('{setting.Key}', '{setting.Value}');";
         }
 
         return (String.IsNullOrEmpty(sql)) ? 0 : dbc.Execute(sql);
@@ -193,6 +204,7 @@ public static class Db
                      "'TelegramName' TEXT NOT NULL,"        +
                      "'Username' TEXT,"                     +
                      "'StorageName' TEXT,"                  +
+                     "'Type' TEXT NOT NULL,"                +
                      "'TelegramId' INTEGER NOT NULL,"       +
                      "'AccessHash' INTEGER NOT NULL,"       +
                      "'LastDownloadedId' INTEGER NOT NULL," +
